@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef, useMemo } from "react";
+import { motion, AnimatePresence } from "motion/react";
 import {
   DifficultyTier,
   Cell,
@@ -40,7 +41,8 @@ import {
   Award,
   Check,
   Search,
-  BookMarked
+  BookMarked,
+  Lock
 } from "lucide-react";
 
 export default function SudokuUI() {
@@ -67,7 +69,10 @@ export default function SudokuUI() {
   // --- Current Game States ---
   const [levelNum, setLevelNum] = useState<number>(() => {
     const val = localStorage.getItem("sudoku_last_played_level");
-    return val ? parseInt(val, 10) : 1;
+    const parsed = val ? parseInt(val, 10) : 1;
+    const unlocked = localStorage.getItem("sudoku_unlocked_level");
+    const unlockedParsed = unlocked ? parseInt(unlocked, 10) : 1;
+    return Math.min(parsed, unlockedParsed);
   });
 
   const [gameState, setGameState] = useState<GameState | null>(null);
@@ -93,6 +98,44 @@ export default function SudokuUI() {
 
   // Success Quote State
   const [completionQuote, setCompletionQuote] = useState<string>("");
+
+  // --- Success Animation States ---
+  const [successAnimationActive, setSuccessAnimationActive] = useState<boolean>(false);
+  const [victoryLeaves, setVictoryLeaves] = useState<Array<{
+    id: number;
+    left: number;
+    size: number;
+    delay: number;
+    duration: number;
+    rotate: number;
+    xOffset: number;
+  }>>([]);
+
+  // Trigger success animation sequence and generate falling leaf particles
+  useEffect(() => {
+    if (gameState?.isCompleted) {
+      setSuccessAnimationActive(true);
+      
+      const leaves = Array.from({ length: 28 }, (_, i) => ({
+        id: i,
+        left: Math.random() * 100,
+        size: Math.random() * 14 + 10, // 10px to 24px
+        delay: Math.random() * 2.5, // staggered entry over 2.5s
+        duration: Math.random() * 5 + 4, // 4s to 9s fall time
+        rotate: Math.random() * 360 + 180,
+        xOffset: (Math.random() - 0.5) * 80, // gentle sway
+      }));
+      setVictoryLeaves(leaves);
+
+      const timer = setTimeout(() => {
+        setSuccessAnimationActive(false);
+      }, 2600); // 2.6s for ripple animation to fully pass and settle
+      return () => clearTimeout(timer);
+    } else {
+      setSuccessAnimationActive(false);
+      setVictoryLeaves([]);
+    }
+  }, [gameState?.isCompleted, gameState?.level]);
 
   // --- Sync Theme With Document Body ---
   useEffect(() => {
@@ -888,9 +931,43 @@ export default function SudokuUI() {
                 </div>
               )}
 
-              {/* Victory Overlay */}
+              {/* Falling Leaves Particles on Victory */}
               {gameState.isCompleted && (
-                <div className="absolute inset-0 z-20 bg-[var(--color-bg-canvas)]/95 flex flex-col items-center justify-center text-center p-6 rounded-2xl animate-place border-2 border-[var(--color-accent)]">
+                <div className="absolute inset-0 pointer-events-none z-30 overflow-hidden rounded-2xl">
+                  {victoryLeaves.map((leaf) => (
+                    <motion.div
+                      key={leaf.id}
+                      initial={{ y: -30, x: `${leaf.left}%`, rotate: 0, opacity: 0 }}
+                      animate={{
+                        y: "110%",
+                        x: `${leaf.left + leaf.xOffset}%`,
+                        rotate: leaf.rotate,
+                        opacity: [0, 0.8, 0.8, 0],
+                      }}
+                      transition={{
+                        duration: leaf.duration,
+                        delay: leaf.delay,
+                        ease: "linear",
+                        repeat: Infinity,
+                      }}
+                      className="absolute rounded-tl-full rounded-br-full bg-emerald-700/20 dark:bg-emerald-400/25 border border-emerald-500/10 shadow-sm"
+                      style={{
+                        width: leaf.size,
+                        height: leaf.size * 0.7,
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
+
+              {/* Victory Overlay */}
+              {gameState.isCompleted && !successAnimationActive && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ duration: 0.6, ease: "easeOut" }}
+                  className="absolute inset-0 z-20 bg-[var(--color-bg-canvas)]/95 flex flex-col items-center justify-center text-center p-6 rounded-2xl border-2 border-[var(--color-accent)] shadow-2xl"
+                >
                   <div className="w-16 h-16 bg-[var(--color-accent-bg)] text-[var(--color-accent)] rounded-full flex items-center justify-center mb-4">
                     <Trophy className="w-8 h-8" />
                   </div>
@@ -939,7 +1016,7 @@ export default function SudokuUI() {
                       </button>
                     )}
                   </div>
-                </div>
+                </motion.div>
               )}
 
               {/* 9x9 Sudoku Grid Cells */}
@@ -984,6 +1061,10 @@ export default function SudokuUI() {
                       bgClass = "bg-[var(--color-error-bg)]";
                     }
 
+                    if (gameState.isCompleted) {
+                      bgClass = "animate-success-cell";
+                    }
+
                     return (
                       <div
                         key={`${r}-${c}`}
@@ -995,17 +1076,21 @@ export default function SudokuUI() {
                           c % 3 === 2 && c !== 8 ? "border-r-2 border-[var(--color-grid-base)]" : ""
                         }`}
                         id={`cell-${r}-${c}`}
+                        style={gameState.isCompleted ? { animationDelay: `${(r + c) * 0.08}s` } : undefined}
                       >
                         {/* Cell Value Rendering */}
                         {cell.value !== 0 ? (
                           <span
                             className={`text-lg sm:text-xl font-display font-semibold transition-transform duration-200 ${
-                              cell.isGiven
+                              gameState.isCompleted
+                                ? "text-[var(--color-cell-placed)] font-bold animate-success-number"
+                                : cell.isGiven
                                 ? "text-[var(--color-cell-given)] font-medium"
                                 : cell.isValid
                                 ? "text-[var(--color-cell-placed)] font-bold animate-place"
                                 : "text-[var(--color-error)] font-bold animate-pulse"
                             }`}
+                            style={gameState.isCompleted ? { animationDelay: `${(r + c) * 0.08}s` } : undefined}
                           >
                             {cell.value}
                           </span>
@@ -1323,20 +1408,27 @@ export default function SudokuUI() {
                   const isCompleted = !!stats?.completed;
                   const tier = getTierForLevel(lvl);
                   const isCurrent = levelNum === lvl;
+                  const isLocked = lvl > unlockedLevel;
 
                   return (
                     <button
                       key={lvl}
                       onClick={() => {
+                        if (isLocked) {
+                          alert(`Please complete previous levels to unlock Level ${lvl}.`);
+                          return;
+                        }
                         setLevelNum(lvl);
                         setActiveTab("game");
                       }}
-                      className={`relative p-3 rounded-xl flex flex-col items-center justify-center border transition-all hover:shadow-md cursor-pointer ${
-                        isCurrent
-                          ? "bg-[var(--color-accent-bg)] border-[var(--color-accent)] text-[var(--color-accent)] font-bold ring-1 ring-[var(--color-accent)]"
+                      className={`relative p-3 rounded-xl flex flex-col items-center justify-center border transition-all ${
+                        isLocked
+                          ? "bg-stone-100/50 dark:bg-stone-900/40 border-dashed border-stone-300 dark:border-stone-800 text-stone-400 dark:text-stone-600 cursor-not-allowed opacity-60"
+                          : isCurrent
+                          ? "bg-[var(--color-accent-bg)] border-[var(--color-accent)] text-[var(--color-accent)] font-bold ring-1 ring-[var(--color-accent)] hover:shadow-md cursor-pointer"
                           : isCompleted
-                          ? "bg-[var(--color-cell-bg)] border-emerald-400 text-stone-600 dark:border-emerald-800"
-                          : "bg-[var(--color-cell-bg)] border-[var(--color-grid-base)] text-[var(--color-cell-given)]"
+                          ? "bg-[var(--color-cell-bg)] border-emerald-400 text-stone-600 dark:border-emerald-800 hover:shadow-md cursor-pointer"
+                          : "bg-[var(--color-cell-bg)] border-[var(--color-grid-base)] text-[var(--color-cell-given)] hover:shadow-md cursor-pointer"
                       }`}
                     >
                       {/* Checkmark icon for completed levels */}
@@ -1346,14 +1438,21 @@ export default function SudokuUI() {
                         </div>
                       )}
 
+                      {/* Lock icon for locked levels */}
+                      {isLocked && (
+                        <div className="absolute top-1 right-1 text-stone-400 dark:text-stone-600" title="Level locked">
+                          <Lock className="w-3 h-3" />
+                        </div>
+                      )}
+
                       <span className="text-sm font-mono font-bold">
                         {lvl}
                       </span>
                       <span className="text-[8px] opacity-75 truncate max-w-full text-center mt-0.5">
-                        {tier.replace(" ", "")}
+                        {isLocked ? "Locked" : tier.replace(" ", "")}
                       </span>
 
-                      {stats?.bestTime && (
+                      {stats?.bestTime && !isLocked && (
                         <span className="text-[7px] font-mono opacity-50 mt-1">
                           {formatTime(stats.bestTime)}
                         </span>

@@ -112,3 +112,51 @@ body {
 .animate-pulse-highlight {
   animation: pulseHighlight 2s infinite ease-in-out;
 }
+
+/* Elegant staggered green wave success ripple on completion */
+@keyframes successRipple {
+  0% {
+    background-color: var(--color-cell-bg);
+    transform: scale(1);
+    box-shadow: none;
+  }
+  25% {
+    background-color: var(--color-cell-selected);
+    transform: scale(1.08);
+    box-shadow: 0 0 12px var(--color-cell-selected);
+    z-index: 10;
+  }
+  50% {
+    background-color: var(--color-cell-highlight);
+    transform: scale(1.03);
+    box-shadow: 0 0 8px var(--color-cell-highlight);
+    z-index: 5;
+  }
+  100% {
+    background-color: var(--color-accent-bg);
+    transform: scale(1);
+    box-shadow: none;
+    z-index: 1;
+  }
+}
+
+.animate-success-cell {
+  animation: successRipple 1.4s cubic-bezier(0.25, 1, 0.5, 1) both;
+}
+
+@keyframes successNumber {
+  0% {
+    transform: scale(1);
+  }
+  25% {
+    transform: scale(1.22);
+    color: var(--color-cell-placed);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.animate-success-number {
+  animation: successNumber 1.4s cubic-bezier(0.25, 1, 0.5, 1) both;
+}
