@@ -1,0 +1,114 @@
+@import "tailwindcss";
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Outfit", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+}
+
+:root {
+  /* Earthy Linen Light Theme */
+  --color-bg-canvas: #F5F1E6;       /* Linen Paper background */
+  --color-grid-base: #DFD7C2;       /* Warm Clay line separators */
+  --color-cell-bg: #FAF8F2;         /* Paper white cells */
+  --color-cell-given: #3E362E;      /* Deep Espresso / Walnut for given digits */
+  --color-cell-placed: #2E4B35;     /* Dark Forest Green for user digits */
+  --color-cell-selected: #D0DCBE;   /* Sage Leaf select state */
+  --color-cell-highlight: #E7EDDB;  /* Soft Moss same-value highlight */
+  --color-cell-note: #6E6259;       /* Muted Charcoal Notes */
+  --color-accent: #2E4B35;          /* Pine Green primary buttons */
+  --color-accent-hover: #1F3624;    /* Shadow Pine */
+  --color-accent-bg: #E3ECD8;       /* Very Soft Sage for active states */
+  --color-error: #B94E4E;           /* Faded Terracotta red */
+  --color-error-bg: #F9EBEB;        /* Muted Red Hue */
+  
+  --transition-smooth: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.theme-dark {
+  /* Rustic Moss Dark Theme */
+  --color-bg-canvas: #1C201A;       /* Dark Pine Wood */
+  --color-grid-base: #2D3329;       /* Mossy Stone */
+  --color-cell-bg: #222820;         /* Pine shadow cell */
+  --color-cell-given: #E9E1D2;      /* Aged Birch given digits */
+  --color-cell-placed: #93B285;     /* Vibrant Sage user digits */
+  --color-cell-selected: #3C4E39;   /* Deep Forest select state */
+  --color-cell-highlight: #2A3628;  /* Subtle Moss Highlight */
+  --color-cell-note: #A69C8E;       /* Sand notes */
+  --color-accent: #5D7954;          /* Soft Foliage buttons */
+  --color-accent-hover: #48613E;    /* Dark Foliage */
+  --color-accent-bg: #2C382A;       /* Deep Pine active states */
+  --color-error: #D66B6B;           /* Light Terracotta red */
+  --color-error-bg: #3E2424;        /* Dark Crimson shadow */
+}
+
+body {
+  background-color: var(--color-bg-canvas);
+  color: var(--color-cell-given);
+  font-family: var(--font-sans);
+  transition: var(--transition-smooth);
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+}
+
+/* Beautiful custom subtle pattern for linen texture */
+.bg-texture {
+  background-image: radial-gradient(rgba(62, 54, 46, 0.04) 1px, transparent 0);
+  background-size: 24px 24px;
+}
+
+.theme-dark .bg-texture {
+  background-image: radial-gradient(rgba(233, 225, 210, 0.03) 1px, transparent 0);
+  background-size: 24px 24px;
+}
+
+/* Custom transitions and scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-grid-base);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-accent);
+}
+
+/* Sudoku cells animations */
+@keyframes placeNumber {
+  0% {
+    transform: scale(0.85);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.animate-place {
+  animation: placeNumber 0.18s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+@keyframes pulseHighlight {
+  0%, 100% {
+    opacity: 0.15;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.animate-pulse-highlight {
+  animation: pulseHighlight 2s infinite ease-in-out;
+}

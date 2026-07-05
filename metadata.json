@@ -1,0 +1,6 @@
+{
+  "name": "Sudoku",
+  "description": "A beautiful, minimalist Sudoku game with over 1,000 deterministic level-seeded puzzles across 5 difficulty tiers in warm earthy tones.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
