@@ -42,7 +42,14 @@ import {
   Check,
   Search,
   BookMarked,
-  Lock
+  Lock,
+  MessageSquare,
+  Send,
+  Loader2,
+  X,
+  Calendar,
+  Flame,
+  BarChart3
 } from "lucide-react";
 
 export default function SudokuUI() {
@@ -62,9 +69,192 @@ export default function SudokuUI() {
     return val === "dark" ? "dark" : "light";
   });
 
+  // --- Game Statistics States ---
+  const [isStatsOpen, setIsStatsOpen] = useState<boolean>(false);
+
+  const [startedGamesByTier, setStartedGamesByTier] = useState<Record<DifficultyTier, number>>(() => {
+    const val = localStorage.getItem("sudoku_started_games_by_tier");
+    if (val) {
+      try {
+        return JSON.parse(val);
+      } catch (e) {}
+    }
+    return {
+      [DifficultyTier.GentleSand]: 0,
+      [DifficultyTier.WarmClay]: 0,
+      [DifficultyTier.Terracotta]: 0,
+      [DifficultyTier.DeepForest]: 0,
+      [DifficultyTier.DarkWalnut]: 0,
+    };
+  });
+
+  const [totalTimeByTier, setTotalTimeByTier] = useState<Record<DifficultyTier, number>>(() => {
+    const val = localStorage.getItem("sudoku_total_time_by_tier");
+    if (val) {
+      try {
+        return JSON.parse(val);
+      } catch (e) {}
+    }
+    return {
+      [DifficultyTier.GentleSand]: 0,
+      [DifficultyTier.WarmClay]: 0,
+      [DifficultyTier.Terracotta]: 0,
+      [DifficultyTier.DeepForest]: 0,
+      [DifficultyTier.DarkWalnut]: 0,
+    };
+  });
+
   // --- Layout Tab ---
-  // "game" | "level-select" | "about-zen"
-  const [activeTab, setActiveTab] = useState<"game" | "level-select" | "about-zen">("game");
+  // "game" | "level-select" | "about-zen" | "daily-puzzle"
+  const [activeTab, setActiveTab] = useState<"game" | "level-select" | "about-zen" | "daily-puzzle">("game");
+
+  // --- Daily Puzzle States ---
+  const [isDailyMode, setIsDailyMode] = useState<boolean>(false);
+  const [dailyDateStr, setDailyDateStr] = useState<string>(() => {
+    const d = new Date();
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  });
+
+  const [completedDailies, setCompletedDailies] = useState<Record<string, { completed: boolean; timeTaken: number }>>(() => {
+    const val = localStorage.getItem("sudoku_completed_dailies");
+    return val ? JSON.parse(val) : {};
+  });
+
+  const [calendarYear, setCalendarYear] = useState<number>(() => new Date().getFullYear());
+  const [calendarMonth, setCalendarMonth] = useState<number>(() => new Date().getMonth());
+  const [selectedCalendarDate, setSelectedCalendarDate] = useState<string>(() => {
+    const d = new Date();
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  });
+
+  // --- Compute Statistics Hook ---
+  const computedStatsByTier = useMemo(() => {
+    const stats: Record<DifficultyTier, { completed: number; started: number; bestTime: number | null; totalTime: number }> = {
+      [DifficultyTier.GentleSand]: { completed: 0, started: startedGamesByTier[DifficultyTier.GentleSand] || 0, bestTime: null, totalTime: totalTimeByTier[DifficultyTier.GentleSand] || 0 },
+      [DifficultyTier.WarmClay]: { completed: 0, started: startedGamesByTier[DifficultyTier.WarmClay] || 0, bestTime: null, totalTime: totalTimeByTier[DifficultyTier.WarmClay] || 0 },
+      [DifficultyTier.Terracotta]: { completed: 0, started: startedGamesByTier[DifficultyTier.Terracotta] || 0, bestTime: null, totalTime: totalTimeByTier[DifficultyTier.Terracotta] || 0 },
+      [DifficultyTier.DeepForest]: { completed: 0, started: startedGamesByTier[DifficultyTier.DeepForest] || 0, bestTime: null, totalTime: totalTimeByTier[DifficultyTier.DeepForest] || 0 },
+      [DifficultyTier.DarkWalnut]: { completed: 0, started: startedGamesByTier[DifficultyTier.DarkWalnut] || 0, bestTime: null, totalTime: totalTimeByTier[DifficultyTier.DarkWalnut] || 0 },
+    };
+
+    // Regular levels
+    Object.values(completedLevels).forEach((lvlStats: any) => {
+      const tier = getTierForLevel(lvlStats.level);
+      stats[tier].completed += 1;
+      if (lvlStats.bestTime) {
+        if (stats[tier].bestTime === null || lvlStats.bestTime < (stats[tier].bestTime || Infinity)) {
+          stats[tier].bestTime = lvlStats.bestTime;
+        }
+      }
+    });
+
+    // Daily levels
+    Object.entries(completedDailies).forEach(([dateStr, dStats]) => {
+      if (dStats && typeof dStats === "object" && "completed" in dStats && dStats.completed) {
+        const level = getDailyLevelNum(dateStr);
+        const tier = getTierForLevel(level);
+        stats[tier].completed += 1;
+        const timeTaken = (dStats as any).timeTaken;
+        if (timeTaken) {
+          if (stats[tier].bestTime === null || timeTaken < (stats[tier].bestTime || Infinity)) {
+            stats[tier].bestTime = timeTaken;
+          }
+        }
+      }
+    });
+
+    // Ensure started >= completed so win rate is realistic
+    Object.keys(stats).forEach((t) => {
+      const tier = t as DifficultyTier;
+      if (stats[tier].started < stats[tier].completed) {
+        stats[tier].started = stats[tier].completed;
+      }
+    });
+
+    return stats;
+  }, [completedLevels, completedDailies, startedGamesByTier, totalTimeByTier]);
+
+  // Helper to calculate a unique stable seed for a given date YYYY-MM-DD
+  const getDailyLevelNum = (dateStr: string): number => {
+    const parts = dateStr.split("-").map(Number);
+    const year = parts[0];
+    const month = parts[1];
+    const day = parts[2];
+    const dateHash = (year * 372 + month * 31 + day) % 10000;
+    const dateObj = new Date(year, month - 1, day);
+    const dayOfWeek = dateObj.getDay(); // 0 (Sun) to 6 (Sat)
+    let base = 1;
+    let range = 199;
+    if (dayOfWeek === 1 || dayOfWeek === 2) {
+      base = 1;
+      range = 199;
+    } else if (dayOfWeek === 3 || dayOfWeek === 4) {
+      base = 201;
+      range = 199;
+    } else if (dayOfWeek === 5) {
+      base = 401;
+      range = 199;
+    } else if (dayOfWeek === 6) {
+      base = 601;
+      range = 199;
+    } else {
+      base = 801;
+      range = 199;
+    }
+    return base + (dateHash % range);
+  };
+
+  const saveCompletedDaily = (dateStr: string, timeTaken: number) => {
+    const updated = {
+      ...completedDailies,
+      [dateStr]: {
+        completed: true,
+        timeTaken,
+      }
+    };
+    setCompletedDailies(updated);
+    localStorage.setItem("sudoku_completed_dailies", JSON.stringify(updated));
+  };
+
+  // Calculate completion streak
+  const completionStreak = useMemo(() => {
+    let streak = 0;
+    let checkDate = new Date(); // Start from today
+    let safetyCounter = 0;
+    while (safetyCounter < 365) {
+      safetyCounter++;
+      const yyyy = checkDate.getFullYear();
+      const mm = String(checkDate.getMonth() + 1).padStart(2, '0');
+      const dd = String(checkDate.getDate()).padStart(2, '0');
+      const dateStr = `${yyyy}-${mm}-${dd}`;
+      if (completedDailies[dateStr]?.completed) {
+        streak++;
+        checkDate.setDate(checkDate.getDate() - 1);
+      } else {
+        // If checking today and it's not completed, check if yesterday was completed to preserve streak
+        if (streak === 0) {
+          const yesterday = new Date();
+          yesterday.setDate(yesterday.getDate() - 1);
+          const y_yyyy = yesterday.getFullYear();
+          const y_mm = String(yesterday.getMonth() + 1).padStart(2, '0');
+          const y_dd = String(yesterday.getDate()).padStart(2, '0');
+          const y_dateStr = `${y_yyyy}-${y_mm}-${y_dd}`;
+          if (completedDailies[y_dateStr]?.completed) {
+            checkDate = yesterday;
+            continue;
+          }
+        }
+        break;
+      }
+    }
+    return streak;
+  }, [completedDailies]);
 
   // --- Current Game States ---
   const [levelNum, setLevelNum] = useState<number>(() => {
@@ -98,6 +288,41 @@ export default function SudokuUI() {
 
   // Success Quote State
   const [completionQuote, setCompletionQuote] = useState<string>("");
+
+  // --- Mobile Fluid Touch & Long-Press Interactions ---
+  const [pressingCell, setPressingCell] = useState<{ row: number; col: number } | null>(null);
+  const [pressProgress, setPressProgress] = useState<number>(0);
+  const pressTimerRef = useRef<any>(null);
+  const pressStartPosRef = useRef<{ x: number; y: number } | null>(null);
+  const isLongPressedRef = useRef<boolean>(false);
+
+  // Clean up timer on unmount
+  useEffect(() => {
+    return () => {
+      if (pressTimerRef.current) {
+        clearInterval(pressTimerRef.current);
+      }
+    };
+  }, []);
+
+  // --- AI Chatbot States & Helpers ---
+  const [isChatOpen, setIsChatOpen] = useState<boolean>(true);
+  const [chatHistory, setChatHistory] = useState<Array<{ sender: "user" | "bot"; text: string }>>([
+    {
+      sender: "bot",
+      text: "Greetings, traveler of patterns. I am your ZenMaster assistant. If you seek guidance on our sandy board, click on any cell and ask me for a hint, or inquire about Sudoku strategies. How can I aid your concentration today?"
+    }
+  ]);
+  const [chatInput, setChatInput] = useState<string>("");
+  const [isChatLoading, setIsChatLoading] = useState<boolean>(false);
+  const [chatError, setChatError] = useState<string | null>(null);
+
+  const chatEndRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (isChatOpen) {
+      chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [chatHistory, isChatLoading, isChatOpen]);
 
   // --- Success Animation States ---
   const [successAnimationActive, setSuccessAnimationActive] = useState<boolean>(false);
@@ -175,10 +400,36 @@ export default function SudokuUI() {
     }
   };
 
+  // --- Reset Level ---
+  const handleResetLevel = () => {
+    if (!window.confirm("Restore this puzzle to its clean starting state? All custom placements and notes will be lost.")) return;
+    initializeLevel(levelNum, true, isDailyMode, isDailyMode ? dailyDateStr : undefined);
+  };
+
+  // --- Helper: Conflict Check on State Changes ---
+  const checkWinCondition = (cells: Cell[][]): boolean => {
+    for (let r = 0; r < 9; r++) {
+      for (let c = 0; c < 9; c++) {
+        const cell = cells[r][c];
+        if (cell.value === 0 || cell.value !== cell.solutionValue) {
+          return false;
+        }
+      }
+    }
+    return true;
+  };
+
   // --- Initialize Level ---
-  const initializeLevel = (level: number, forceNew: boolean = false) => {
+  const initializeLevel = (level: number, forceNew: boolean = false, isDaily: boolean = false, targetDateStr?: string) => {
+    const activeDailyStr = targetDateStr || dailyDateStr;
+    const actualLevel = isDaily ? getDailyLevelNum(activeDailyStr) : level;
+    
     // Check if we have saved progress for this exact level
-    const savedProgress = localStorage.getItem(`sudoku_saved_progress_l${level}`);
+    const savedProgressKey = isDaily
+      ? `sudoku_saved_progress_daily_${activeDailyStr}`
+      : `sudoku_saved_progress_l${actualLevel}`;
+    
+    const savedProgress = localStorage.getItem(savedProgressKey);
     
     if (savedProgress && !forceNew) {
       try {
@@ -211,8 +462,14 @@ export default function SudokuUI() {
 
         setUndoStack(parsed.undoStack || []);
         setRedoStack(parsed.redoStack || []);
-        setLevelNum(level);
-        localStorage.setItem("sudoku_last_played_level", level.toString());
+        if (!isDaily) {
+          setLevelNum(actualLevel);
+          localStorage.setItem("sudoku_last_played_level", actualLevel.toString());
+        }
+        setIsDailyMode(isDaily);
+        if (targetDateStr) {
+          setDailyDateStr(targetDateStr);
+        }
         setActiveTab("game");
         return;
       } catch (e) {
@@ -221,7 +478,17 @@ export default function SudokuUI() {
     }
 
     // Fresh generation
-    const { puzzle, solution, tier } = generateSudokuPuzzle(level);
+    const { puzzle, solution, tier } = generateSudokuPuzzle(actualLevel);
+
+    // Increment started games for this tier
+    setStartedGamesByTier((prev) => {
+      const updated = {
+        ...prev,
+        [tier]: (prev[tier] || 0) + 1,
+      };
+      localStorage.setItem("sudoku_started_games_by_tier", JSON.stringify(updated));
+      return updated;
+    });
     
     const cellGrid: Cell[][] = [];
     for (let r = 0; r < 9; r++) {
@@ -243,7 +510,7 @@ export default function SudokuUI() {
     }
 
     setGameState({
-      level,
+      level: actualLevel,
       tier,
       cells: cellGrid,
       startTime: Date.now(),
@@ -262,8 +529,14 @@ export default function SudokuUI() {
 
     setUndoStack([]);
     setRedoStack([]);
-    setLevelNum(level);
-    localStorage.setItem("sudoku_last_played_level", level.toString());
+    if (!isDaily) {
+      setLevelNum(actualLevel);
+      localStorage.setItem("sudoku_last_played_level", actualLevel.toString());
+    }
+    setIsDailyMode(isDaily);
+    if (targetDateStr) {
+      setDailyDateStr(targetDateStr);
+    }
     setActiveTab("game");
     
     // Clear completion state
@@ -272,7 +545,9 @@ export default function SudokuUI() {
 
   // Load level on start or when level changes
   useEffect(() => {
-    initializeLevel(levelNum);
+    if (!isDailyMode) {
+      initializeLevel(levelNum, false, false);
+    }
   }, [levelNum]);
 
   // --- Active State Persistence ---
@@ -309,7 +584,11 @@ export default function SudokuUI() {
       redoStack: rStack,
     };
 
-    localStorage.setItem(`sudoku_saved_progress_l${state.level}`, JSON.stringify(progress));
+    const savedProgressKey = isDailyMode
+      ? `sudoku_saved_progress_daily_${dailyDateStr}`
+      : `sudoku_saved_progress_l${state.level}`;
+
+    localStorage.setItem(savedProgressKey, JSON.stringify(progress));
   };
 
   // Timer loop
@@ -321,6 +600,17 @@ export default function SudokuUI() {
           const nextTime = Math.floor((Date.now() - prev.startTime) / 1000);
           const next = { ...prev, elapsedTime: nextTime };
           persistCurrentProgress(next, undoStack, redoStack);
+
+          // Update total time played for this tier
+          setTotalTimeByTier((timePrev) => {
+            const updated = {
+              ...timePrev,
+              [prev.tier]: (timePrev[prev.tier] || 0) + 1,
+            };
+            localStorage.setItem("sudoku_total_time_by_tier", JSON.stringify(updated));
+            return updated;
+          });
+
           return next;
         });
       }, 1000);
@@ -458,25 +748,6 @@ export default function SudokuUI() {
     });
   };
 
-  // --- Reset Level ---
-  const handleResetLevel = () => {
-    if (!window.confirm("Restore this puzzle to its clean starting state? All custom placements and notes will be lost.")) return;
-    initializeLevel(levelNum, true);
-  };
-
-  // --- Helper: Conflict Check on State Changes ---
-  const checkWinCondition = (cells: Cell[][]): boolean => {
-    for (let r = 0; r < 9; r++) {
-      for (let c = 0; c < 9; c++) {
-        const cell = cells[r][c];
-        if (cell.value === 0 || cell.value !== cell.solutionValue) {
-          return false;
-        }
-      }
-    }
-    return true;
-  };
-
   // --- Input & Number Action Handlers ---
   const handleCellAction = (row: number, col: number, targetValue: number, isPencilAction: boolean) => {
     handleGameStateChange((prev) => {
@@ -543,12 +814,15 @@ export default function SudokuUI() {
       // Check for completion
       const completedNow = checkWinCondition(nextGrid);
       let isCompleted = prev.isCompleted;
-      let timeTaken = prev.elapsedTime;
 
       if (completedNow && !isCompleted) {
         isCompleted = true;
         // Trigger completion callback
-        saveCompletedStats(prev.level, prev.elapsedTime);
+        if (isDailyMode) {
+          saveCompletedDaily(dailyDateStr, prev.elapsedTime);
+        } else {
+          saveCompletedStats(prev.level, prev.elapsedTime);
+        }
         setCompletionQuote(getRandomQuote(prev.level));
       }
 
@@ -579,6 +853,109 @@ export default function SudokuUI() {
         moveCount: prev.moveCount + 1,
       };
     });
+  };
+
+  // --- Responsive Touch & Long Press Event Handlers for Mobile Fluidity ---
+  const handlePressStart = (row: number, col: number, clientX: number, clientY: number) => {
+    if (!gameState || gameState.isPaused || gameState.isCompleted) return;
+
+    if (pressTimerRef.current) {
+      clearInterval(pressTimerRef.current);
+    }
+
+    isLongPressedRef.current = false;
+    pressStartPosRef.current = { x: clientX, y: clientY };
+
+    const cell = gameState.cells[row][col];
+    if (cell.isGiven) {
+      // Clues shouldn't be long-pressed to clear
+      setPressingCell(null);
+      setPressProgress(0);
+      return;
+    }
+
+    setPressingCell({ row, col });
+    setPressProgress(0);
+
+    const duration = 500; // ms for full long press
+    const step = 20; // check interval
+    let elapsed = 0;
+
+    pressTimerRef.current = setInterval(() => {
+      elapsed += step;
+      const progress = Math.min((elapsed / duration) * 100, 100);
+      setPressProgress(progress);
+
+      if (elapsed >= duration) {
+        clearInterval(pressTimerRef.current);
+        pressTimerRef.current = null;
+        isLongPressedRef.current = true;
+        
+        // Trigger cell clear!
+        handleEraseCell(row, col);
+
+        // Haptic feedback
+        if (navigator.vibrate) {
+          try {
+            navigator.vibrate(40);
+          } catch (e) {
+            // Ignore if security or device blocks
+          }
+        }
+
+        // Keep visual complete state briefly, then reset
+        setTimeout(() => {
+          setPressingCell((current) => {
+            if (current && current.row === row && current.col === col) {
+              return null;
+            }
+            return current;
+          });
+          setPressProgress(0);
+        }, 120);
+      }
+    }, step);
+  };
+
+  const handlePressMove = (clientX: number, clientY: number) => {
+    if (!pressStartPosRef.current || !pressingCell) return;
+
+    const dx = clientX - pressStartPosRef.current.x;
+    const dy = clientY - pressStartPosRef.current.y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+
+    // Cancel long press if user moves finger significantly (e.g. scrolling the page)
+    if (distance > 10) {
+      cancelPress();
+    }
+  };
+
+  const handlePressEnd = (row: number, col: number) => {
+    const wasLongPressed = isLongPressedRef.current;
+
+    if (pressTimerRef.current) {
+      clearInterval(pressTimerRef.current);
+      pressTimerRef.current = null;
+    }
+
+    setPressingCell(null);
+    setPressProgress(0);
+    pressStartPosRef.current = null;
+
+    // Only select the cell if it wasn't a long press and we didn't cancel due to movement
+    if (!wasLongPressed) {
+      handleCellClick(row, col);
+    }
+  };
+
+  const cancelPress = () => {
+    if (pressTimerRef.current) {
+      clearInterval(pressTimerRef.current);
+      pressTimerRef.current = null;
+    }
+    setPressingCell(null);
+    setPressProgress(0);
+    pressStartPosRef.current = null;
   };
 
   // --- Grid Cell Interaction Dispatcher ---
@@ -709,6 +1086,21 @@ export default function SudokuUI() {
     return `${m}:${s < 10 ? "0" : ""}${s}`;
   };
 
+  const formatTotalTime = (totalSeconds: number) => {
+    if (!totalSeconds) return "0s";
+    const h = Math.floor(totalSeconds / 3600);
+    const m = Math.floor((totalSeconds % 3600) / 60);
+    const s = totalSeconds % 60;
+    
+    if (h > 0) {
+      return `${h}h ${m}m ${s}s`;
+    }
+    if (m > 0) {
+      return `${m}m ${s}s`;
+    }
+    return `${s}s`;
+  };
+
   // Total completed calculation
   const totalCompletedCount = useMemo(() => {
     return Object.keys(completedLevels).length;
@@ -753,6 +1145,90 @@ export default function SudokuUI() {
     }
   };
 
+  // Send message to the server-side Gemini AI Chatbot
+  const handleSendChatMessage = async (textToSend?: string) => {
+    const queryText = textToSend || chatInput.trim();
+    if (!queryText) return;
+
+    if (!textToSend) {
+      setChatInput("");
+    }
+
+    // Append user message immediately
+    setChatHistory((prev) => [...prev, { sender: "user", text: queryText }]);
+    setIsChatLoading(true);
+    setChatError(null);
+
+    // Simplify board cells structure to avoid heavy payload
+    const boardState = gameState?.cells.map((row) =>
+      row.map((cell) => ({
+        value: cell.value,
+        solutionValue: cell.solutionValue,
+        isGiven: cell.isGiven,
+        isValid: cell.isValid,
+      }))
+    );
+
+    const selectedCell = {
+      row: gameState?.selectedRow,
+      col: gameState?.selectedCol,
+    };
+
+    try {
+      const response = await fetch("/api/gemini/hint", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          level: gameState?.level || levelNum,
+          tier: gameState?.tier || getTierForLevel(levelNum),
+          selectedCell,
+          boardState,
+          message: queryText,
+          chatHistory: chatHistory.map((m) => ({
+            role: m.sender === "user" ? "user" : "model",
+            text: m.text,
+          })),
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.message || "Failed to contact ZenMaster AI.");
+      }
+
+      setChatHistory((prev) => [...prev, { sender: "bot", text: data.text }]);
+    } catch (err: any) {
+      console.error(err);
+      setChatError(err.message || "A quiet wind disrupted the connection. Let's try again.");
+    } finally {
+      setIsChatLoading(false);
+    }
+  };
+
+  // Trigger templates for quick AI assistance
+  const requestQuickHint = (type: "selected-cell" | "check-mistakes" | "suggest-scan") => {
+    if (!gameState) return;
+
+    let query = "";
+    if (type === "selected-cell") {
+      if (gameState.selectedRow === null || gameState.selectedCol === null) {
+        alert("Please select a cell on the board first so I know where to guide you.");
+        return;
+      }
+      query = `Can you look at Row ${gameState.selectedRow + 1}, Column ${gameState.selectedCol + 1} and give me a gentle clue to solve it?`;
+    } else if (type === "check-mistakes") {
+      query = "Please scan my current entries on the board and let me know if there are any mistakes or conflicts.";
+    } else if (type === "suggest-scan") {
+      query = "Please scan the overall board and suggest a good area (a specific row, column, or 3x3 box) for me to focus on next.";
+    }
+
+    if (query) {
+      handleSendChatMessage(query);
+    }
+  };
+
   // Auto solve developer assist/cheat check (Very high polish, kept discreetly for evaluation)
   const handleQuickSolve = () => {
     if (!gameState) return;
@@ -767,7 +1243,11 @@ export default function SudokuUI() {
           notes: new Set<number>(),
         }))
       );
-      saveCompletedStats(prev.level, prev.elapsedTime);
+      if (isDailyMode) {
+        saveCompletedDaily(dailyDateStr, prev.elapsedTime);
+      } else {
+        saveCompletedStats(prev.level, prev.elapsedTime);
+      }
       setCompletionQuote(getRandomQuote(prev.level));
 
       return {
@@ -798,19 +1278,27 @@ export default function SudokuUI() {
     <div className="min-h-screen bg-texture py-6 px-4 flex flex-col items-center justify-between transition-colors duration-300">
       
       {/* --- Top Navigation Header --- */}
-      <header className="w-full max-w-lg mb-4 flex items-center justify-between border-b border-[var(--color-grid-base)] pb-3">
-        <div className="flex items-center gap-2">
-          <BookMarked className="w-5 h-5 text-[var(--color-accent)]" />
-          <h1 className="text-xl font-display font-bold tracking-tight text-[var(--color-cell-given)]">
-            Zen <span className="text-[var(--color-accent)] font-medium">Sudoku</span>
-          </h1>
+      <header className="w-full max-w-lg lg:max-w-4xl xl:max-w-5xl mb-4 flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between border-b border-[var(--color-grid-base)] pb-3">
+        <div className="flex items-center gap-3">
+          <BookMarked className="w-5 h-5 text-[var(--color-accent)] shrink-0" />
+          <div className="flex flex-col">
+            <h1 className="text-xl font-display font-bold tracking-tight text-[var(--color-cell-given)] leading-none">
+              Zen <span className="text-[var(--color-accent)] font-medium">Sudoku</span>
+            </h1>
+            <span className="text-[10px] text-[var(--color-cell-note)] font-mono leading-none mt-1">
+              made by <span className="font-semibold text-[var(--color-cell-given)]">Soumya Ranjan Bhujabal</span>
+            </span>
+          </div>
         </div>
 
         <div className="flex items-center gap-2">
           <button
-            onClick={() => setActiveTab("game")}
+            onClick={() => {
+              setIsDailyMode(false);
+              setActiveTab("game");
+            }}
             className={`px-3 py-1.5 text-xs font-medium rounded-full transition-all ${
-              activeTab === "game"
+              activeTab === "game" && !isDailyMode
                 ? "bg-[var(--color-accent)] text-[var(--color-cell-bg)] shadow-sm"
                 : "text-[var(--color-cell-note)] hover:bg-[var(--color-grid-base)]/30"
             }`}
@@ -828,6 +1316,17 @@ export default function SudokuUI() {
             Levels
           </button>
           <button
+            onClick={() => setActiveTab("daily-puzzle")}
+            className={`px-3 py-1.5 text-xs font-medium rounded-full transition-all flex items-center gap-1 ${
+              activeTab === "daily-puzzle" || (isDailyMode && activeTab === "game")
+                ? "bg-[var(--color-accent)] text-[var(--color-cell-bg)] shadow-sm font-semibold"
+                : "text-[var(--color-cell-note)] hover:bg-[var(--color-grid-base)]/30"
+            }`}
+          >
+            <Calendar className="w-3.5 h-3.5" />
+            <span>Daily Puzzle</span>
+          </button>
+          <button
             onClick={() => setActiveTab("about-zen")}
             className={`px-3 py-1.5 text-xs font-medium rounded-full transition-all ${
               activeTab === "about-zen"
@@ -840,11 +1339,36 @@ export default function SudokuUI() {
 
           <span className="w-px h-4 bg-[var(--color-grid-base)]" />
 
+          {/* Zen AI Assistant Button */}
+          <button
+            onClick={() => setIsChatOpen((prev) => !prev)}
+            className={`p-2 rounded-full transition-all relative ${
+              isChatOpen
+                ? "bg-[var(--color-accent)] text-[var(--color-cell-bg)] shadow-xs"
+                : "text-[var(--color-cell-note)] hover:bg-[var(--color-grid-base)]/30"
+            }`}
+            title={isChatOpen ? "Close Zen AI Assistant" : "Ask Zen AI Assistant for Hints"}
+            type="button"
+          >
+            <Sparkles className="w-4 h-4" />
+          </button>
+
+          {/* Game Statistics Button */}
+          <button
+            onClick={() => setIsStatsOpen(true)}
+            className="p-2 text-[var(--color-cell-note)] hover:bg-[var(--color-grid-base)]/30 rounded-full transition-colors relative"
+            title="View Game Achievements & Statistics"
+            type="button"
+          >
+            <BarChart3 className="w-4 h-4 text-[var(--color-accent)]" />
+          </button>
+
           {/* Theme Switcher Button */}
           <button
             onClick={() => setThemeMode((prev) => (prev === "light" ? "dark" : "light"))}
             className="p-2 text-[var(--color-cell-note)] hover:bg-[var(--color-grid-base)]/30 rounded-full transition-colors"
             title="Toggle Rustic theme mode"
+            type="button"
           >
             {themeMode === "light" ? (
               <Moon className="w-4 h-4 text-stone-700" />
@@ -856,17 +1380,27 @@ export default function SudokuUI() {
       </header>
 
       {/* --- Main Content Body --- */}
-      <main className="w-full max-w-lg flex-1 flex flex-col items-center justify-center">
+      <main className="w-full max-w-lg lg:max-w-4xl xl:max-w-5xl flex-1 flex flex-col items-center justify-center">
         
         {/* ===================== TAB: GAME ===================== */}
         {activeTab === "game" && gameState && (
-          <div className="w-full flex flex-col items-center animate-place">
+          <div className="w-full flex flex-col lg:flex-row items-start gap-6 animate-place">
+            
+            {/* Left Column: Board and normal game controls */}
+            <div className="flex-1 w-full max-w-lg mx-auto flex flex-col items-center">
             
             {/* Level & Tier Badge Bar */}
             <div className="w-full flex items-center justify-between mb-3 px-1">
               <div>
                 <div className="text-[var(--color-cell-note)] text-xs font-mono tracking-wider">
-                  LEVEL {gameState.level} / 1000+
+                  {isDailyMode ? (
+                    <span className="flex items-center gap-1.5 text-[var(--color-accent)] font-semibold">
+                      <Calendar className="w-3.5 h-3.5" />
+                      DAILY PUZZLE • {dailyDateStr}
+                    </span>
+                  ) : (
+                    <span>LEVEL {gameState.level} / 1000+</span>
+                  )}
                 </div>
                 <div className="flex items-center gap-1.5 mt-0.5">
                   <h2 className="text-lg font-display font-semibold text-[var(--color-cell-given)]">
@@ -972,10 +1506,14 @@ export default function SudokuUI() {
                     <Trophy className="w-8 h-8" />
                   </div>
                   <h3 className="text-2xl font-display font-bold text-[var(--color-cell-given)]">
-                    Level Completed
+                    {isDailyMode ? "Daily Goal Achieved" : "Level Completed"}
                   </h3>
                   <p className="text-xs font-mono uppercase tracking-widest text-[var(--color-accent)] mt-1 font-semibold">
-                    {gameState.tier} — Level {gameState.level}
+                    {isDailyMode ? (
+                      `Daily Puzzle — ${dailyDateStr}`
+                    ) : (
+                      `${gameState.tier} — Level ${gameState.level}`
+                    )}
                   </p>
 
                   <div className="my-5 p-4 rounded-xl bg-[var(--color-grid-base)]/20 border border-[var(--color-grid-base)]/50 max-w-[320px]">
@@ -1001,19 +1539,29 @@ export default function SudokuUI() {
 
                   <div className="flex gap-3">
                     <button
-                      onClick={() => initializeLevel(gameState.level, true)}
+                      onClick={() => initializeLevel(gameState.level, true, isDailyMode, isDailyMode ? dailyDateStr : undefined)}
                       className="px-4 py-2 border border-[var(--color-accent)] text-[var(--color-accent)] rounded-full hover:bg-[var(--color-accent-bg)] transition-all text-xs font-medium"
                     >
                       Play Again
                     </button>
-                    {gameState.level < 1000 && (
+                    {isDailyMode ? (
                       <button
-                        onClick={handleNextLevel}
+                        onClick={() => setActiveTab("daily-puzzle")}
                         className="px-5 py-2 bg-[var(--color-accent)] text-[var(--color-cell-bg)] rounded-full hover:bg-[var(--color-accent-hover)] transition-all text-xs font-medium flex items-center gap-1 shadow"
                       >
-                        Next Level
-                        <ChevronRight className="w-3.5 h-3.5" />
+                        <Calendar className="w-3.5 h-3.5" />
+                        Daily Tracker
                       </button>
+                    ) : (
+                      gameState.level < 1000 && (
+                        <button
+                          onClick={handleNextLevel}
+                          className="px-5 py-2 bg-[var(--color-accent)] text-[var(--color-cell-bg)] rounded-full hover:bg-[var(--color-accent-hover)] transition-all text-xs font-medium flex items-center gap-1 shadow"
+                        >
+                          Next Level
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+                      )
                     )}
                   </div>
                 </motion.div>
@@ -1068,12 +1616,18 @@ export default function SudokuUI() {
                     return (
                       <div
                         key={`${r}-${c}`}
-                        onClick={() => handleCellClick(r, c)}
-                        className={`relative aspect-square flex items-center justify-center cursor-pointer transition-colors duration-150 select-none ${bgClass} ${
+                        onPointerDown={(e) => handlePressStart(r, c, e.clientX, e.clientY)}
+                        onPointerUp={() => handlePressEnd(r, c)}
+                        onPointerMove={(e) => handlePressMove(e.clientX, e.clientY)}
+                        onPointerCancel={cancelPress}
+                        onContextMenu={(e) => e.preventDefault()}
+                        className={`relative aspect-square flex items-center justify-center cursor-pointer transition-all duration-150 select-none touch-pan-y ${bgClass} ${
                           // Borders for 3x3 blocks
                           r % 3 === 2 && r !== 8 ? "border-b-2 border-[var(--color-grid-base)]" : ""
                         } ${
                           c % 3 === 2 && c !== 8 ? "border-r-2 border-[var(--color-grid-base)]" : ""
+                        } ${
+                          pressingCell?.row === r && pressingCell?.col === c ? "scale-95" : ""
                         }`}
                         id={`cell-${r}-${c}`}
                         style={gameState.isCompleted ? { animationDelay: `${(r + c) * 0.08}s` } : undefined}
@@ -1107,6 +1661,34 @@ export default function SudokuUI() {
                                 {num}
                               </div>
                             ))}
+                          </div>
+                        )}
+
+                        {/* Long-press Progress Ring Overlay */}
+                        {pressingCell?.row === r && pressingCell?.col === c && pressProgress > 0 && (
+                          <div className="absolute inset-0 flex items-center justify-center bg-stone-900/10 dark:bg-white/10 pointer-events-none z-20">
+                            <svg className="w-10 h-10 transform -rotate-90">
+                              <circle
+                                cx="20"
+                                cy="20"
+                                r="16"
+                                stroke="var(--color-grid-base)"
+                                strokeWidth="2.5"
+                                fill="transparent"
+                                className="opacity-30"
+                              />
+                              <circle
+                                cx="20"
+                                cy="20"
+                                r="16"
+                                stroke="var(--color-accent)"
+                                strokeWidth="2.5"
+                                fill="transparent"
+                                strokeDasharray={100}
+                                strokeDashoffset={100 - (pressProgress / 100) * 100}
+                                strokeLinecap="round"
+                              />
+                            </svg>
                           </div>
                         )}
                       </div>
@@ -1338,8 +1920,141 @@ export default function SudokuUI() {
 
             </div>
 
-          </div>
-        )}
+          </div> {/* Closing Left Column */}
+
+          {/* Right Column: Zen AI Assistant Column */}
+          <AnimatePresence>
+            {isChatOpen && (
+              <motion.div
+                initial={{ opacity: 0, width: 0, x: 20 }}
+                animate={{ opacity: 1, width: "auto", x: 0 }}
+                exit={{ opacity: 0, width: 0, x: 20 }}
+                transition={{ duration: 0.3, ease: "easeInOut" }}
+                className="w-full lg:w-[350px] xl:w-[380px] shrink-0 flex flex-col lg:sticky lg:top-4 gap-3 overflow-hidden"
+              >
+                <div className="w-full p-4 rounded-2xl bg-[var(--color-grid-base)]/25 border border-[var(--color-grid-base)] flex flex-col gap-3">
+                  {/* Header */}
+                  <div className="flex items-center justify-between border-b border-[var(--color-grid-base)] pb-2">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                      <span className="text-xs font-display font-semibold text-[var(--color-cell-given)]">
+                        ZenMaster AI Tutor
+                      </span>
+                    </div>
+                    
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setChatHistory([
+                          {
+                            sender: "bot",
+                            text: "Greetings, traveler of patterns. I am your ZenMaster assistant. If you seek guidance on our sandy board, click on any cell and ask me for a hint, or inquire about Sudoku strategies. How can I aid your concentration today?"
+                          }
+                        ])}
+                        className="text-[10px] font-mono text-[var(--color-cell-note)] hover:text-[var(--color-cell-given)] transition-colors cursor-pointer"
+                        title="Reset chat"
+                        type="button"
+                      >
+                        Reset Chat
+                      </button>
+                      <button
+                        onClick={() => setIsChatOpen(false)}
+                        className="text-[var(--color-cell-note)] hover:text-[var(--color-cell-given)] cursor-pointer"
+                        type="button"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Quick Hint Action Chips */}
+                  <div className="flex flex-wrap gap-1.5 py-0.5">
+                    <button
+                      onClick={() => requestQuickHint("selected-cell")}
+                      className="px-2.5 py-1 bg-[var(--color-cell-bg)] border border-[var(--color-grid-base)] text-[10px] rounded-lg text-[var(--color-cell-given)] hover:bg-[var(--color-accent-bg)] hover:text-[var(--color-accent)] hover:border-[var(--color-accent)]/30 transition-all cursor-pointer font-medium"
+                      type="button"
+                    >
+                      💡 Clue for Selected Cell
+                    </button>
+                    <button
+                      onClick={() => requestQuickHint("check-mistakes")}
+                      className="px-2.5 py-1 bg-[var(--color-cell-bg)] border border-[var(--color-grid-base)] text-[10px] rounded-lg text-[var(--color-cell-given)] hover:bg-[var(--color-accent-bg)] hover:text-[var(--color-accent)] hover:border-[var(--color-accent)]/30 transition-all cursor-pointer font-medium"
+                      type="button"
+                    >
+                      🔍 Check Mistakes
+                    </button>
+                    <button
+                      onClick={() => requestQuickHint("suggest-scan")}
+                      className="px-2.5 py-1 bg-[var(--color-cell-bg)] border border-[var(--color-grid-base)] text-[10px] rounded-lg text-[var(--color-cell-given)] hover:bg-[var(--color-accent-bg)] hover:text-[var(--color-accent)] hover:border-[var(--color-accent)]/30 transition-all cursor-pointer font-medium"
+                      type="button"
+                    >
+                      🧭 Suggest Next Scan
+                    </button>
+                  </div>
+
+                  {/* Message Log */}
+                  <div className="max-h-[220px] lg:max-h-[380px] overflow-y-auto flex flex-col gap-2 p-2 bg-[var(--color-cell-bg)] rounded-xl border border-[var(--color-grid-base)] scrollbar-thin">
+                    {chatHistory.map((msg, index) => (
+                      <div
+                        key={index}
+                        className={`max-w-[85%] rounded-2xl px-3 py-2 text-xs leading-relaxed ${
+                          msg.sender === "user"
+                            ? "bg-[var(--color-accent-bg)] text-[var(--color-accent)] self-end rounded-tr-none font-medium"
+                            : "bg-[var(--color-grid-base)]/10 text-[var(--color-cell-given)] border-l-2 border-[var(--color-accent)] self-start rounded-tl-none"
+                        }`}
+                      >
+                        <p className="whitespace-pre-wrap">{msg.text}</p>
+                      </div>
+                    ))}
+
+                    {isChatLoading && (
+                      <div className="flex items-center gap-2 text-xs text-[var(--color-cell-note)] italic p-1">
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-[var(--color-accent)]" />
+                        <span>ZenMaster is reflecting on the stones...</span>
+                      </div>
+                    )}
+
+                    {chatError && (
+                      <div className="p-2 rounded-xl bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/40 text-red-700 dark:text-red-300 text-xs">
+                        {chatError}
+                      </div>
+                    )}
+
+                    <div ref={chatEndRef} />
+                  </div>
+
+                  {/* Message Input Form */}
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      handleSendChatMessage();
+                    }}
+                    className="flex gap-2"
+                  >
+                    <input
+                      type="text"
+                      value={chatInput}
+                      onChange={(e) => setChatInput(e.target.value)}
+                      placeholder="Ask ZenMaster about this board or strategy..."
+                      className="flex-1 px-3 py-2 bg-[var(--color-cell-bg)] border border-[var(--color-grid-base)] rounded-xl text-xs text-[var(--color-cell-given)] placeholder-stone-400 focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)] transition-all"
+                      disabled={isChatLoading}
+                    />
+                    <button
+                      type="submit"
+                      disabled={isChatLoading || !chatInput.trim()}
+                      className={`p-2 bg-[var(--color-accent)] text-[var(--color-cell-bg)] rounded-xl hover:bg-[var(--color-accent-hover)] transition-all flex items-center justify-center ${
+                        isChatLoading || !chatInput.trim() ? "opacity-40 cursor-not-allowed" : "cursor-pointer"
+                      }`}
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                    </button>
+                  </form>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+        </div>
+      )}
 
         {/* ===================== TAB: LEVEL SELECT ===================== */}
         {activeTab === "level-select" && (
@@ -1571,6 +2286,264 @@ export default function SudokuUI() {
           </div>
         )}
 
+        {/* ===================== TAB: DAILY PUZZLE ===================== */}
+        {activeTab === "daily-puzzle" && (() => {
+          const firstDay = new Date(calendarYear, calendarMonth, 1).getDay();
+          const numDays = new Date(calendarYear, calendarMonth + 1, 0).getDate();
+          
+          const monthNames = [
+            "January", "February", "March", "April", "May", "June",
+            "July", "August", "September", "October", "November", "December"
+          ];
+          
+          const daysArray = [];
+          for (let i = 0; i < firstDay; i++) {
+            daysArray.push(null); // padding empty slots
+          }
+          for (let i = 1; i <= numDays; i++) {
+            daysArray.push(i);
+          }
+
+          // Format check for highlight / select
+          const todayObj = new Date();
+          const todayStr = `${todayObj.getFullYear()}-${String(todayObj.getMonth() + 1).padStart(2, '0')}-${String(todayObj.getDate()).padStart(2, '0')}`;
+
+          const selParts = selectedCalendarDate.split("-").map(Number);
+          const isSelectedCompleted = completedDailies[selectedCalendarDate]?.completed;
+          const selectedTimeTaken = completedDailies[selectedCalendarDate]?.timeTaken;
+          const selectedLevelNum = getDailyLevelNum(selectedCalendarDate);
+          const selDate = new Date(selParts[0], selParts[1] - 1, selParts[2]);
+          const isSelectedFuture = selDate > new Date(todayObj.getFullYear(), todayObj.getMonth(), todayObj.getDate());
+
+          const handlePrevMonth = () => {
+            if (calendarMonth === 0) {
+              setCalendarMonth(11);
+              setCalendarYear(y => y - 1);
+            } else {
+              setCalendarMonth(m => m - 1);
+            }
+          };
+
+          const handleNextMonth = () => {
+            if (calendarMonth === 11) {
+              setCalendarMonth(0);
+              setCalendarYear(y => y + 1);
+            } else {
+              setCalendarMonth(m => m + 1);
+            }
+          };
+
+          const totalDailiesCompleted = Object.values(completedDailies).filter((d: any) => d?.completed).length;
+
+          return (
+            <div className="w-full grid grid-cols-1 md:grid-cols-3 gap-6 animate-place">
+              {/* Left 2 Columns: Calendar Board */}
+              <div className="md:col-span-2 w-full bg-[var(--color-cell-bg)] border border-[var(--color-grid-base)] rounded-2xl p-5 shadow-sm">
+                
+                {/* Header with navigation */}
+                <div className="flex items-center justify-between mb-4 pb-3 border-b border-[var(--color-grid-base)]">
+                  <div>
+                    <h3 className="text-base font-display font-semibold text-[var(--color-cell-given)]">
+                      {monthNames[calendarMonth]} {calendarYear}
+                    </h3>
+                    <p className="text-[10px] text-[var(--color-cell-note)] font-mono uppercase tracking-wider">
+                      Daily Zen Calendar
+                    </p>
+                  </div>
+                  <div className="flex gap-1">
+                    <button
+                      onClick={handlePrevMonth}
+                      className="p-1.5 rounded-lg border border-[var(--color-grid-base)] hover:bg-[var(--color-grid-base)]/20 text-[var(--color-cell-given)] transition-all cursor-pointer"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => {
+                        const d = new Date();
+                        setCalendarMonth(d.getMonth());
+                        setCalendarYear(d.getFullYear());
+                        const todayFormatted = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+                        setSelectedCalendarDate(todayFormatted);
+                      }}
+                      className="px-2.5 py-1 text-[10px] font-mono border border-[var(--color-grid-base)] hover:bg-[var(--color-grid-base)]/20 text-[var(--color-cell-given)] rounded-lg transition-all cursor-pointer"
+                    >
+                      Today
+                    </button>
+                    <button
+                      onClick={handleNextMonth}
+                      className="p-1.5 rounded-lg border border-[var(--color-grid-base)] hover:bg-[var(--color-grid-base)]/20 text-[var(--color-cell-given)] transition-all cursor-pointer"
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Day labels */}
+                <div className="grid grid-cols-7 gap-1 text-center mb-1">
+                  {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map(day => (
+                    <span key={day} className="text-[10px] font-mono uppercase tracking-widest text-[var(--color-cell-note)] font-bold py-1">
+                      {day}
+                    </span>
+                  ))}
+                </div>
+
+                {/* Calendar Days grid */}
+                <div className="grid grid-cols-7 gap-1">
+                  {daysArray.map((dayNum, idx) => {
+                    if (dayNum === null) {
+                      return <div key={`empty-${idx}`} className="aspect-square bg-stone-50/10 dark:bg-stone-900/10 rounded-xl" />;
+                    }
+
+                    const formattedDate = `${calendarYear}-${String(calendarMonth + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+                    const isToday = formattedDate === todayStr;
+                    const isSelected = formattedDate === selectedCalendarDate;
+                    const stats = completedDailies[formattedDate];
+                    const isDone = !!stats?.completed;
+
+                    const dayDate = new Date(calendarYear, calendarMonth, dayNum);
+                    const todayDate = new Date(todayObj.getFullYear(), todayObj.getMonth(), todayObj.getDate());
+                    const isFuture = dayDate > todayDate;
+
+                    return (
+                      <button
+                        key={`day-${dayNum}`}
+                        onClick={() => setSelectedCalendarDate(formattedDate)}
+                        className={`aspect-square relative flex flex-col items-center justify-between p-1.5 rounded-xl border transition-all text-left ${
+                          isFuture
+                            ? "bg-stone-100/30 dark:bg-stone-900/20 border-dashed border-stone-200 dark:border-stone-800 text-stone-400 dark:text-stone-700 opacity-60 cursor-not-allowed"
+                            : isSelected
+                            ? "bg-[var(--color-accent-bg)] border-[var(--color-accent)] ring-1 ring-[var(--color-accent)] font-bold text-[var(--color-accent)] scale-102 z-10 shadow-sm cursor-pointer"
+                            : isDone
+                            ? "bg-emerald-500/5 dark:bg-emerald-500/10 border-emerald-300 dark:border-emerald-950 text-stone-700 dark:text-stone-300 hover:shadow-xs cursor-pointer"
+                            : "bg-[var(--color-cell-bg)] border-[var(--color-grid-base)] text-[var(--color-cell-given)] hover:bg-[var(--color-grid-base)]/10 cursor-pointer"
+                        }`}
+                      >
+                        <div className="flex justify-between items-start w-full">
+                          <span className="text-xs font-mono font-medium">{dayNum}</span>
+                          {isToday && !isSelected && (
+                            <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-ping" title="Today" />
+                          )}
+                        </div>
+
+                        {/* Status indicators */}
+                        <div className="w-full flex justify-end items-end mt-auto">
+                          {isFuture ? (
+                            <Lock className="w-3 h-3 text-stone-300 dark:text-stone-800" />
+                          ) : isDone ? (
+                            <div className="bg-emerald-500 text-white rounded-full p-0.5 shadow-sm" title="Completed">
+                              <Check className="w-2.5 h-2.5" />
+                            </div>
+                          ) : (
+                            <span className="text-[7px] font-mono opacity-40 text-[var(--color-cell-note)]">
+                              L.{getDailyLevelNum(formattedDate)}
+                            </span>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Right Column: Date details and Stats Card */}
+              <div className="flex flex-col gap-4 w-full">
+                
+                {/* Stats Card */}
+                <div className="bg-[var(--color-cell-bg)] border border-[var(--color-grid-base)] rounded-2xl p-5 shadow-sm text-center">
+                  <h4 className="text-[10px] text-[var(--color-cell-note)] font-mono uppercase tracking-wider mb-2">
+                    YOUR MEDITATION STATS
+                  </h4>
+                  <div className="grid grid-cols-2 gap-4 divide-x divide-[var(--color-grid-base)]">
+                    <div>
+                      <span className="block text-2xl font-mono font-bold text-emerald-500">
+                        {totalDailiesCompleted}
+                      </span>
+                      <span className="text-[9px] text-[var(--color-cell-note)] uppercase tracking-wider font-semibold block mt-0.5">
+                        Total Done
+                      </span>
+                    </div>
+                    <div>
+                      <span className="block text-2xl font-mono font-bold text-amber-500 flex items-center justify-center gap-1">
+                        <Flame className="w-5 h-5 fill-amber-500/20 text-amber-500 inline shrink-0" />
+                        {completionStreak}
+                      </span>
+                      <span className="text-[9px] text-[var(--color-cell-note)] uppercase tracking-wider font-semibold block mt-0.5">
+                        Current Streak
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Day Action details */}
+                <div className="bg-[var(--color-cell-bg)] border border-[var(--color-grid-base)] rounded-2xl p-5 shadow-sm flex-1 flex flex-col justify-between min-h-[220px]">
+                  <div>
+                    <div className="flex items-center gap-1.5 text-xs text-[var(--color-accent)] font-mono uppercase tracking-widest font-semibold mb-1">
+                      <Calendar className="w-4 h-4 text-[var(--color-accent)]" />
+                      <span>Challenge Info</span>
+                    </div>
+                    <h3 className="text-lg font-display font-bold text-[var(--color-cell-given)]">
+                      {monthNames[selParts[1] - 1]} {selParts[2]}, {selParts[0]}
+                    </h3>
+                    <p className="text-[11px] text-[var(--color-cell-note)] mt-1 font-sans">
+                      A unique seed is calculated from this date, providing a stable, structured grid. Every traveler on this day receives the exact same puzzle layout.
+                    </p>
+
+                    <div className="mt-5 space-y-2.5">
+                      <div className="flex items-center justify-between text-xs border-b border-[var(--color-grid-base)]/50 pb-1.5">
+                        <span className="text-[var(--color-cell-note)]">Puzzle Seed Level</span>
+                        <span className="font-mono font-semibold text-[var(--color-cell-given)]">
+                          Level {selectedLevelNum}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between text-xs border-b border-[var(--color-grid-base)]/50 pb-1.5">
+                        <span className="text-[var(--color-cell-note)]">Difficulty Tier</span>
+                        <span className="font-semibold text-[var(--color-cell-given)]">
+                          {getTierForLevel(selectedLevelNum)}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between text-xs pb-1 border-b border-[var(--color-grid-base)]/50 pb-1.5">
+                        <span className="text-[var(--color-cell-note)]">Status</span>
+                        <span className={`font-semibold ${isSelectedCompleted ? "text-emerald-500" : "text-amber-500"}`}>
+                          {isSelectedCompleted ? "✓ Completed" : "○ Not Completed"}
+                        </span>
+                      </div>
+                      {isSelectedCompleted && selectedTimeTaken && (
+                        <div className="flex items-center justify-between text-xs pb-1">
+                          <span className="text-[var(--color-cell-note)]">Time Taken</span>
+                          <span className="font-mono font-semibold text-[var(--color-cell-given)]">
+                            {formatTime(selectedTimeTaken)}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="mt-6">
+                    {isSelectedFuture ? (
+                      <button
+                        disabled
+                        className="w-full py-2.5 bg-stone-100 dark:bg-stone-900 border border-[var(--color-grid-base)] text-stone-400 dark:text-stone-600 rounded-xl font-semibold text-xs flex items-center justify-center gap-1.5 shadow-inner cursor-not-allowed"
+                      >
+                        <Lock className="w-4 h-4 text-stone-300 dark:text-stone-600" />
+                        <span>Locked (Releases {monthNames[selParts[1] - 1]} {selParts[2]})</span>
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => initializeLevel(0, false, true, selectedCalendarDate)}
+                        className="w-full py-2.5 bg-[var(--color-accent)] hover:bg-[var(--color-accent-hover)] text-[var(--color-cell-bg)] rounded-xl transition-all font-semibold text-xs flex items-center justify-center gap-1.5 shadow cursor-pointer"
+                      >
+                        <span>{isSelectedCompleted ? "Replay Challenge" : "Begin Meditation"}</span>
+                        <ChevronRight className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          );
+        })()}
+
       </main>
 
       {/* --- Footer Signature --- */}
@@ -1578,6 +2551,193 @@ export default function SudokuUI() {
         <div>100% Client-Side Generator • Seed-Based Deterministic Matrix</div>
         <div className="opacity-60 mt-0.5">Level {levelNum} • {getTierForLevel(levelNum)}</div>
       </footer>
+
+      {/* ===================== GAME STATISTICS OVERLAY ===================== */}
+      <AnimatePresence>
+        {isStatsOpen && (
+          <div className="fixed inset-0 bg-stone-900/65 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              transition={{ type: "spring", duration: 0.4 }}
+              className="w-full max-w-2xl bg-[var(--color-cell-bg)] border border-[var(--color-grid-base)] rounded-3xl p-6 shadow-2xl relative flex flex-col max-h-[90vh] overflow-hidden"
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between pb-4 border-b border-[var(--color-grid-base)] mb-4">
+                <div>
+                  <h2 className="text-lg font-display font-bold text-[var(--color-cell-given)] flex items-center gap-2">
+                    <BarChart3 className="w-5 h-5 text-[var(--color-accent)]" />
+                    <span>Meditation Achievements</span>
+                  </h2>
+                  <p className="text-[10px] text-[var(--color-cell-note)] font-mono uppercase tracking-wider">
+                    Journey Stats & Tier Mastery
+                  </p>
+                </div>
+                <button
+                  onClick={() => setIsStatsOpen(false)}
+                  className="p-1.5 rounded-lg border border-[var(--color-grid-base)] hover:bg-[var(--color-grid-base)]/20 text-[var(--color-cell-given)] transition-all cursor-pointer"
+                  title="Close Overlay"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Body Content */}
+              <div className="flex-1 overflow-y-auto pr-1 space-y-4">
+                
+                {/* Summary row */}
+                <div className="grid grid-cols-3 gap-3 bg-[var(--color-grid-base)]/5 p-4 rounded-2xl border border-[var(--color-grid-base)]/40 text-center">
+                  <div>
+                    <span className="block text-2xl font-mono font-bold text-[var(--color-accent)]">
+                      {totalCompletedCount}
+                    </span>
+                    <span className="text-[9px] text-[var(--color-cell-note)] uppercase tracking-wider font-semibold">
+                      Total Solved
+                    </span>
+                  </div>
+                  <div>
+                    <span className="block text-2xl font-mono font-bold text-emerald-500">
+                      {Object.values(completedDailies).filter((d: any) => d?.completed).length}
+                    </span>
+                    <span className="text-[9px] text-[var(--color-cell-note)] uppercase tracking-wider font-semibold">
+                      Dailies Solved
+                    </span>
+                  </div>
+                  <div>
+                    <span className="block text-2xl font-mono font-bold text-amber-500">
+                      {completionStreak}
+                    </span>
+                    <span className="text-[9px] text-[var(--color-cell-note)] uppercase tracking-wider font-semibold">
+                      Current Streak
+                    </span>
+                  </div>
+                </div>
+
+                {/* Tier breakdown cards */}
+                <div className="space-y-3">
+                  <h3 className="text-xs font-mono uppercase tracking-wider text-[var(--color-cell-note)] font-bold">
+                    Mastery Breakdown by Tier
+                  </h3>
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {Object.values(DifficultyTier).map((tier) => {
+                      const stats = computedStatsByTier[tier];
+                      const completed = stats.completed;
+                      const started = stats.started;
+                      const winRate = started > 0 ? Math.round((completed / started) * 100) : 0;
+                      const bestTimeStr = stats.bestTime ? formatTime(stats.bestTime) : "—";
+                      const totalTimeStr = formatTotalTime(stats.totalTime);
+
+                      // Bullet/color mapping
+                      let dotColor = "bg-amber-400";
+                      if (tier === DifficultyTier.WarmClay) dotColor = "bg-orange-400";
+                      if (tier === DifficultyTier.Terracotta) dotColor = "bg-red-400";
+                      if (tier === DifficultyTier.DeepForest) dotColor = "bg-emerald-400";
+                      if (tier === DifficultyTier.DarkWalnut) dotColor = "bg-stone-500";
+
+                      return (
+                        <div
+                          key={tier}
+                          className="bg-[var(--color-cell-bg)] border border-[var(--color-grid-base)]/70 rounded-2xl p-4 flex flex-col justify-between hover:shadow-md transition-all"
+                        >
+                          <div>
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="text-xs font-display font-bold text-[var(--color-cell-given)] flex items-center gap-1.5">
+                                <span className={`w-2 h-2 rounded-full ${dotColor}`} />
+                                {tier}
+                              </span>
+                              <span className="text-[10px] font-mono font-bold text-[var(--color-accent)] bg-[var(--color-accent-bg)] px-2 py-0.5 rounded-full">
+                                {winRate}% WR
+                              </span>
+                            </div>
+
+                            <div className="text-[10px] text-[var(--color-cell-note)] mb-3">
+                              {tier === DifficultyTier.GentleSand && "Smooth entry point (Levels 1–200)"}
+                              {tier === DifficultyTier.WarmClay && "Intermediate deduction (Levels 201–400)"}
+                              {tier === DifficultyTier.Terracotta && "Hidden patterns (Levels 401–600)"}
+                              {tier === DifficultyTier.DeepForest && "Expert chain reasoning (Levels 601–800)"}
+                              {tier === DifficultyTier.DarkWalnut && "Elite master puzzles (Levels 801–1000+)"}
+                            </div>
+
+                            {/* Progress bar */}
+                            <div className="w-full bg-[var(--color-grid-base)]/25 rounded-full h-1.5 mb-4 overflow-hidden">
+                              <div
+                                className={`h-full ${dotColor} transition-all duration-500`}
+                                style={{ width: `${Math.min(100, winRate)}%` }}
+                              />
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-3 gap-2 pt-2 border-t border-[var(--color-grid-base)]/40 text-left">
+                            <div>
+                              <span className="block text-[8px] text-[var(--color-cell-note)] font-mono uppercase tracking-wider">
+                                Solved
+                              </span>
+                              <span className="text-xs font-mono font-bold text-[var(--color-cell-given)]">
+                                {completed}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="block text-[8px] text-[var(--color-cell-note)] font-mono uppercase tracking-wider">
+                                Best Time
+                              </span>
+                              <span className="text-xs font-mono font-bold text-[var(--color-cell-given)]">
+                                {bestTimeStr}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="block text-[8px] text-[var(--color-cell-note)] font-mono uppercase tracking-wider">
+                                Time Played
+                              </span>
+                              <span className="text-xs font-mono font-bold text-[var(--color-cell-given)] truncate block" title={totalTimeStr}>
+                                {totalTimeStr}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+              </div>
+
+              {/* Footer with a subtle message & clear option */}
+              <div className="mt-5 pt-3 border-t border-[var(--color-grid-base)] flex items-center justify-between">
+                <span className="text-[9px] text-[var(--color-cell-note)] font-mono italic">
+                  "Step by step, the sandy paths clear of mist."
+                </span>
+                <button
+                  onClick={() => {
+                    if (window.confirm("Are you sure you want to clear your statistics? This will reset your win rate, started counts, and total time played statistics (completed levels lists will remain preserved).")) {
+                      localStorage.removeItem("sudoku_started_games_by_tier");
+                      localStorage.removeItem("sudoku_total_time_by_tier");
+                      setStartedGamesByTier({
+                        [DifficultyTier.GentleSand]: 0,
+                        [DifficultyTier.WarmClay]: 0,
+                        [DifficultyTier.Terracotta]: 0,
+                        [DifficultyTier.DeepForest]: 0,
+                        [DifficultyTier.DarkWalnut]: 0,
+                      });
+                      setTotalTimeByTier({
+                        [DifficultyTier.GentleSand]: 0,
+                        [DifficultyTier.WarmClay]: 0,
+                        [DifficultyTier.Terracotta]: 0,
+                        [DifficultyTier.DeepForest]: 0,
+                        [DifficultyTier.DarkWalnut]: 0,
+                      });
+                    }
+                  }}
+                  className="text-[9px] font-mono text-[var(--color-error)] hover:underline opacity-60 hover:opacity-100 transition-opacity cursor-pointer"
+                >
+                  Reset Stats
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
     </div>
   );
