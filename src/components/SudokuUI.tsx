@@ -37,19 +37,17 @@ import {
   ChevronRight,
   BookOpen,
   Sliders,
-  Sparkles,
   Award,
   Check,
   Search,
   BookMarked,
   Lock,
-  MessageSquare,
-  Send,
-  Loader2,
   X,
   Calendar,
   Flame,
-  BarChart3
+  BarChart3,
+  Lightbulb,
+  Sparkles
 } from "lucide-react";
 
 export default function SudokuUI() {
@@ -305,24 +303,8 @@ export default function SudokuUI() {
     };
   }, []);
 
-  // --- AI Chatbot States & Helpers ---
-  const [isChatOpen, setIsChatOpen] = useState<boolean>(true);
-  const [chatHistory, setChatHistory] = useState<Array<{ sender: "user" | "bot"; text: string }>>([
-    {
-      sender: "bot",
-      text: "Greetings, traveler of patterns. I am your ZenMaster assistant. If you seek guidance on our sandy board, click on any cell and ask me for a hint, or inquire about Sudoku strategies. How can I aid your concentration today?"
-    }
-  ]);
-  const [chatInput, setChatInput] = useState<string>("");
-  const [isChatLoading, setIsChatLoading] = useState<boolean>(false);
-  const [chatError, setChatError] = useState<string | null>(null);
-
-  const chatEndRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (isChatOpen) {
-      chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [chatHistory, isChatLoading, isChatOpen]);
+  // --- Cell Hint State ---
+  const [cellHint, setCellHint] = useState<{ row: number; col: number; text: string; solution: number } | null>(null);
 
   // --- Success Animation States ---
   const [successAnimationActive, setSuccessAnimationActive] = useState<boolean>(false);
@@ -421,6 +403,7 @@ export default function SudokuUI() {
 
   // --- Initialize Level ---
   const initializeLevel = (level: number, forceNew: boolean = false, isDaily: boolean = false, targetDateStr?: string) => {
+    setCellHint(null);
     const activeDailyStr = targetDateStr || dailyDateStr;
     const actualLevel = isDaily ? getDailyLevelNum(activeDailyStr) : level;
     
@@ -962,6 +945,8 @@ export default function SudokuUI() {
   const handleCellClick = (row: number, col: number) => {
     if (!gameState || gameState.isPaused || gameState.isCompleted) return;
 
+    setCellHint(null);
+
     if (gameState.inputMode === "cell-first") {
       // Normal Selection Mode
       handleGameStateChange((prev) => {
@@ -1145,88 +1130,98 @@ export default function SudokuUI() {
     }
   };
 
-  // Send message to the server-side Gemini AI Chatbot
-  const handleSendChatMessage = async (textToSend?: string) => {
-    const queryText = textToSend || chatInput.trim();
-    if (!queryText) return;
-
-    if (!textToSend) {
-      setChatInput("");
-    }
-
-    // Append user message immediately
-    setChatHistory((prev) => [...prev, { sender: "user", text: queryText }]);
-    setIsChatLoading(true);
-    setChatError(null);
-
-    // Simplify board cells structure to avoid heavy payload
-    const boardState = gameState?.cells.map((row) =>
-      row.map((cell) => ({
-        value: cell.value,
-        solutionValue: cell.solutionValue,
-        isGiven: cell.isGiven,
-        isValid: cell.isValid,
-      }))
-    );
-
-    const selectedCell = {
-      row: gameState?.selectedRow,
-      col: gameState?.selectedCol,
-    };
-
-    try {
-      const response = await fetch("/api/gemini/hint", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          level: gameState?.level || levelNum,
-          tier: gameState?.tier || getTierForLevel(levelNum),
-          selectedCell,
-          boardState,
-          message: queryText,
-          chatHistory: chatHistory.map((m) => ({
-            role: m.sender === "user" ? "user" : "model",
-            text: m.text,
-          })),
-        }),
-      });
-
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.message || "Failed to contact ZenMaster AI.");
-      }
-
-      setChatHistory((prev) => [...prev, { sender: "bot", text: data.text }]);
-    } catch (err: any) {
-      console.error(err);
-      setChatError(err.message || "A quiet wind disrupted the connection. Let's try again.");
-    } finally {
-      setIsChatLoading(false);
-    }
-  };
-
-  // Trigger templates for quick AI assistance
-  const requestQuickHint = (type: "selected-cell" | "check-mistakes" | "suggest-scan") => {
+  // Generate a beautiful, mindful, fully accurate hint for the selected cell
+  const handleGetCellHint = () => {
     if (!gameState) return;
 
-    let query = "";
-    if (type === "selected-cell") {
-      if (gameState.selectedRow === null || gameState.selectedCol === null) {
-        alert("Please select a cell on the board first so I know where to guide you.");
-        return;
-      }
-      query = `Can you look at Row ${gameState.selectedRow + 1}, Column ${gameState.selectedCol + 1} and give me a gentle clue to solve it?`;
-    } else if (type === "check-mistakes") {
-      query = "Please scan my current entries on the board and let me know if there are any mistakes or conflicts.";
-    } else if (type === "suggest-scan") {
-      query = "Please scan the overall board and suggest a good area (a specific row, column, or 3x3 box) for me to focus on next.";
+    if (gameState.selectedRow === null || gameState.selectedCol === null) {
+      setCellHint({
+        row: -1,
+        col: -1,
+        solution: 0,
+        text: "Please tap on any empty cell on the board first, then ask for a hint to reveal its mystery."
+      });
+      return;
     }
 
-    if (query) {
-      handleSendChatMessage(query);
+    const r = gameState.selectedRow;
+    const c = gameState.selectedCol;
+    const cell = gameState.cells[r][c];
+
+    if (cell.isGiven) {
+      setCellHint({
+        row: r,
+        col: c,
+        solution: cell.solutionValue,
+        text: `Row ${r + 1}, Column ${c + 1} is a starting clue given by the mountain sand. Its value is correctly set to ${cell.solutionValue}.`
+      });
+      return;
     }
+
+    if (cell.value === cell.solutionValue) {
+      setCellHint({
+        row: r,
+        col: c,
+        solution: cell.solutionValue,
+        text: `Row ${r + 1}, Column ${c + 1} is already filled with the correct number ${cell.solutionValue}. Your focus is sharp.`
+      });
+      return;
+    }
+
+    // Let's generate a beautiful Zen clue
+    const rowStr = `Row ${r + 1}`;
+    const colStr = `Column ${c + 1}`;
+    const boxNum = Math.floor(r / 3) * 3 + Math.floor(c / 3) + 1;
+    const boxStr = `3x3 Box ${boxNum}`;
+
+    // Get numbers already placed in same row, column, box to make it educational!
+    const rowValues = new Set<number>();
+    const colValues = new Set<number>();
+    const boxValues = new Set<number>();
+
+    for (let i = 0; i < 9; i++) {
+      if (gameState.cells[r][i].value !== 0) {
+        rowValues.add(gameState.cells[r][i].value);
+      }
+      if (gameState.cells[i][c].value !== 0) {
+        colValues.add(gameState.cells[i][c].value);
+      }
+    }
+    const boxRStart = Math.floor(r / 3) * 3;
+    const boxCStart = Math.floor(c / 3) * 3;
+    for (let br = 0; br < 3; br++) {
+      for (let bc = 0; bc < 3; bc++) {
+        const val = gameState.cells[boxRStart + br][boxCStart + bc].value;
+        if (val !== 0) {
+          boxValues.add(val);
+        }
+      }
+    }
+
+    // Join values for display
+    const rowList = Array.from(rowValues).sort().join(", ");
+    const colList = Array.from(colValues).sort().join(", ");
+    const boxList = Array.from(boxValues).sort().join(", ");
+
+    let clueExplanation = "";
+    if (rowValues.size > 5) {
+      clueExplanation = `Because ${rowStr} is already populated with [${rowList}], the path narrows. `;
+    } else if (colValues.size > 5) {
+      clueExplanation = `Because ${colStr} already holds [${colList}], the correct alignment becomes clear. `;
+    } else if (boxValues.size > 5) {
+      clueExplanation = `Scanning ${boxStr}, the stones [${boxList}] are already placed. `;
+    } else {
+      clueExplanation = "Through quiet contemplation of the intersecting lines, the correct number stands apart. ";
+    }
+
+    const text = `${clueExplanation}For ${rowStr}, ${colStr}, the correct digit to restore balance is ${cell.solutionValue}.`;
+
+    setCellHint({
+      row: r,
+      col: c,
+      solution: cell.solutionValue,
+      text
+    });
   };
 
   // Auto solve developer assist/cheat check (Very high polish, kept discreetly for evaluation)
@@ -1335,22 +1330,6 @@ export default function SudokuUI() {
             }`}
           >
             Zen Wisdom
-          </button>
-
-          <span className="w-px h-4 bg-[var(--color-grid-base)]" />
-
-          {/* Zen AI Assistant Button */}
-          <button
-            onClick={() => setIsChatOpen((prev) => !prev)}
-            className={`p-2 rounded-full transition-all relative ${
-              isChatOpen
-                ? "bg-[var(--color-accent)] text-[var(--color-cell-bg)] shadow-xs"
-                : "text-[var(--color-cell-note)] hover:bg-[var(--color-grid-base)]/30"
-            }`}
-            title={isChatOpen ? "Close Zen AI Assistant" : "Ask Zen AI Assistant for Hints"}
-            type="button"
-          >
-            <Sparkles className="w-4 h-4" />
           </button>
 
           {/* Game Statistics Button */}
@@ -1833,8 +1812,8 @@ export default function SudokuUI() {
                   })}
                 </div>
 
-                {/* Sub-Action Buttons: Pencil Notes, Erase, Hints Helper */}
-                <div className="grid grid-cols-3 gap-2">
+                {/* Sub-Action Buttons: Pencil Notes, Erase, Highlights, Hints */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   
                   {/* Pencil Note Toggle */}
                   <button
@@ -1891,7 +1870,66 @@ export default function SudokuUI() {
                     <span>Highlights</span>
                   </button>
 
+                  {/* Selected Cell Hint Button */}
+                  <button
+                    onClick={handleGetCellHint}
+                    className={`py-2 px-3 border rounded-xl font-medium text-xs flex items-center justify-center gap-2 transition-all ${
+                      cellHint
+                        ? "bg-amber-500/15 border-amber-500 text-amber-600 dark:text-amber-400 font-semibold shadow-xs"
+                        : "border-[var(--color-grid-base)] bg-[var(--color-cell-bg)] text-[var(--color-cell-note)] hover:bg-[var(--color-grid-base)]/30"
+                    }`}
+                    title="Get a gentle Zen hint for the currently selected cell"
+                  >
+                    <Lightbulb className="w-4 h-4 text-amber-500" />
+                    <span>Hint</span>
+                  </button>
+
                 </div>
+
+                {/* Beautiful Cell Hint Message Container */}
+                <AnimatePresence>
+                  {cellHint && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0, y: -10 }}
+                      animate={{ opacity: 1, height: "auto", y: 0 }}
+                      exit={{ opacity: 0, height: 0, y: -10 }}
+                      className="p-3.5 bg-amber-500/5 dark:bg-amber-500/10 border border-amber-500/30 rounded-2xl flex flex-col gap-2.5 text-xs overflow-hidden"
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400 font-semibold font-display">
+                          <Lightbulb className="w-4 h-4" />
+                          <span>Zen Pattern Hint</span>
+                        </div>
+                        <button
+                          onClick={() => setCellHint(null)}
+                          className="text-stone-400 hover:text-stone-600 dark:hover:text-stone-200 transition-colors"
+                          title="Close hint"
+                          type="button"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      <p className="text-[var(--color-cell-given)] leading-relaxed font-sans font-medium">
+                        {cellHint.text}
+                      </p>
+                      
+                      {/* Interactive Reveal button inside hint */}
+                      {cellHint.row !== -1 && !gameState.cells[cellHint.row][cellHint.col].isGiven && gameState.cells[cellHint.row][cellHint.col].value !== cellHint.solution && (
+                        <button
+                          onClick={() => {
+                            // Automatically solve/fill this cell
+                            handleCellAction(cellHint.row, cellHint.col, cellHint.solution, false);
+                            setCellHint(null);
+                          }}
+                          className="self-end px-3 py-1 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/20 text-amber-700 dark:text-amber-300 font-semibold text-[11px] rounded-lg transition-all"
+                          type="button"
+                        >
+                          Place Correct Digit ({cellHint.solution})
+                        </button>
+                      )}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
 
                 {/* Auto Clear Notes toggle & Quick Solve discrete helper */}
                 <div className="flex items-center justify-between text-[11px] text-[var(--color-cell-note)] px-1 pt-1.5 border-t border-[var(--color-grid-base)]">
@@ -1922,136 +1960,6 @@ export default function SudokuUI() {
 
           </div> {/* Closing Left Column */}
 
-          {/* Right Column: Zen AI Assistant Column */}
-          <AnimatePresence>
-            {isChatOpen && (
-              <motion.div
-                initial={{ opacity: 0, width: 0, x: 20 }}
-                animate={{ opacity: 1, width: "auto", x: 0 }}
-                exit={{ opacity: 0, width: 0, x: 20 }}
-                transition={{ duration: 0.3, ease: "easeInOut" }}
-                className="w-full lg:w-[350px] xl:w-[380px] shrink-0 flex flex-col lg:sticky lg:top-4 gap-3 overflow-hidden"
-              >
-                <div className="w-full p-4 rounded-2xl bg-[var(--color-grid-base)]/25 border border-[var(--color-grid-base)] flex flex-col gap-3">
-                  {/* Header */}
-                  <div className="flex items-center justify-between border-b border-[var(--color-grid-base)] pb-2">
-                    <div className="flex items-center gap-2">
-                      <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                      <span className="text-xs font-display font-semibold text-[var(--color-cell-given)]">
-                        ZenMaster AI Tutor
-                      </span>
-                    </div>
-                    
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => setChatHistory([
-                          {
-                            sender: "bot",
-                            text: "Greetings, traveler of patterns. I am your ZenMaster assistant. If you seek guidance on our sandy board, click on any cell and ask me for a hint, or inquire about Sudoku strategies. How can I aid your concentration today?"
-                          }
-                        ])}
-                        className="text-[10px] font-mono text-[var(--color-cell-note)] hover:text-[var(--color-cell-given)] transition-colors cursor-pointer"
-                        title="Reset chat"
-                        type="button"
-                      >
-                        Reset Chat
-                      </button>
-                      <button
-                        onClick={() => setIsChatOpen(false)}
-                        className="text-[var(--color-cell-note)] hover:text-[var(--color-cell-given)] cursor-pointer"
-                        type="button"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Quick Hint Action Chips */}
-                  <div className="flex flex-wrap gap-1.5 py-0.5">
-                    <button
-                      onClick={() => requestQuickHint("selected-cell")}
-                      className="px-2.5 py-1 bg-[var(--color-cell-bg)] border border-[var(--color-grid-base)] text-[10px] rounded-lg text-[var(--color-cell-given)] hover:bg-[var(--color-accent-bg)] hover:text-[var(--color-accent)] hover:border-[var(--color-accent)]/30 transition-all cursor-pointer font-medium"
-                      type="button"
-                    >
-                      💡 Clue for Selected Cell
-                    </button>
-                    <button
-                      onClick={() => requestQuickHint("check-mistakes")}
-                      className="px-2.5 py-1 bg-[var(--color-cell-bg)] border border-[var(--color-grid-base)] text-[10px] rounded-lg text-[var(--color-cell-given)] hover:bg-[var(--color-accent-bg)] hover:text-[var(--color-accent)] hover:border-[var(--color-accent)]/30 transition-all cursor-pointer font-medium"
-                      type="button"
-                    >
-                      🔍 Check Mistakes
-                    </button>
-                    <button
-                      onClick={() => requestQuickHint("suggest-scan")}
-                      className="px-2.5 py-1 bg-[var(--color-cell-bg)] border border-[var(--color-grid-base)] text-[10px] rounded-lg text-[var(--color-cell-given)] hover:bg-[var(--color-accent-bg)] hover:text-[var(--color-accent)] hover:border-[var(--color-accent)]/30 transition-all cursor-pointer font-medium"
-                      type="button"
-                    >
-                      🧭 Suggest Next Scan
-                    </button>
-                  </div>
-
-                  {/* Message Log */}
-                  <div className="max-h-[220px] lg:max-h-[380px] overflow-y-auto flex flex-col gap-2 p-2 bg-[var(--color-cell-bg)] rounded-xl border border-[var(--color-grid-base)] scrollbar-thin">
-                    {chatHistory.map((msg, index) => (
-                      <div
-                        key={index}
-                        className={`max-w-[85%] rounded-2xl px-3 py-2 text-xs leading-relaxed ${
-                          msg.sender === "user"
-                            ? "bg-[var(--color-accent-bg)] text-[var(--color-accent)] self-end rounded-tr-none font-medium"
-                            : "bg-[var(--color-grid-base)]/10 text-[var(--color-cell-given)] border-l-2 border-[var(--color-accent)] self-start rounded-tl-none"
-                        }`}
-                      >
-                        <p className="whitespace-pre-wrap">{msg.text}</p>
-                      </div>
-                    ))}
-
-                    {isChatLoading && (
-                      <div className="flex items-center gap-2 text-xs text-[var(--color-cell-note)] italic p-1">
-                        <Loader2 className="w-3.5 h-3.5 animate-spin text-[var(--color-accent)]" />
-                        <span>ZenMaster is reflecting on the stones...</span>
-                      </div>
-                    )}
-
-                    {chatError && (
-                      <div className="p-2 rounded-xl bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/40 text-red-700 dark:text-red-300 text-xs">
-                        {chatError}
-                      </div>
-                    )}
-
-                    <div ref={chatEndRef} />
-                  </div>
-
-                  {/* Message Input Form */}
-                  <form
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      handleSendChatMessage();
-                    }}
-                    className="flex gap-2"
-                  >
-                    <input
-                      type="text"
-                      value={chatInput}
-                      onChange={(e) => setChatInput(e.target.value)}
-                      placeholder="Ask ZenMaster about this board or strategy..."
-                      className="flex-1 px-3 py-2 bg-[var(--color-cell-bg)] border border-[var(--color-grid-base)] rounded-xl text-xs text-[var(--color-cell-given)] placeholder-stone-400 focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)] transition-all"
-                      disabled={isChatLoading}
-                    />
-                    <button
-                      type="submit"
-                      disabled={isChatLoading || !chatInput.trim()}
-                      className={`p-2 bg-[var(--color-accent)] text-[var(--color-cell-bg)] rounded-xl hover:bg-[var(--color-accent-hover)] transition-all flex items-center justify-center ${
-                        isChatLoading || !chatInput.trim() ? "opacity-40 cursor-not-allowed" : "cursor-pointer"
-                      }`}
-                    >
-                      <Send className="w-3.5 h-3.5" />
-                    </button>
-                  </form>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
 
         </div>
       )}
